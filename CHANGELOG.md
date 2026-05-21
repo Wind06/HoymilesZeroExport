@@ -1,5 +1,9 @@
 # Changelog
 
+## V 1.105
+### script
+* prepare Shelly Pro 3EM for Firmware V2.x.x (new Endpoints)
+
 ## V 1.104
 ### script
 * fix JSON-Boolean Value in OpenDTU API (https://github.com/reserve85/HoymilesZeroExport/issues/247)
