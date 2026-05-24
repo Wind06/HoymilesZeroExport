@@ -15,7 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 __author__ = "Tobias Kraft"
-__version__ = "1.104"
+__version__ = "1.105"
 
 import time
 from requests.sessions import Session
@@ -24,6 +24,7 @@ from requests.auth import HTTPDigestAuth
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 import os
+import re
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from configparser import ConfigParser
@@ -636,8 +637,44 @@ class Shelly3EM(Shelly):
         return CastToInt(self.GetJson('/status')['total_power'])
 
 class Shelly3EMPro(Shelly):
+    def __init__(self, ip: str, user: str, password: str, emeterindex: str):
+        super().__init__(ip, user, password, emeterindex)
+        self._detect_firmware()
+
+    def _detect_firmware(self):
+        try:
+            info = self.GetRpcJson('/Shelly.GetDeviceInfo')
+            ver_str = info.get('ver', '0.0.0')
+            nums = [int(x) for x in re.findall(r'\d+', ver_str)[:3]]
+            while len(nums) < 3:
+                nums.append(0)
+            self.fw_new_api = tuple(nums) >= (2, 0, 0)
+            logger.info(f"Shelly3EMPro firmware: {ver_str}, using {'new' if self.fw_new_api else 'legacy'} API")
+        except Exception as e:
+            logger.warning(f"Could not detect Shelly3EMPro firmware version, falling back to legacy API: {e}")
+            self.fw_new_api = False
+
     def GetPowermeterWatts(self):
+        if self.fw_new_api:
+            return self._GetPowermeterWatts_new()
+        return self._GetPowermeterWatts_legacy()
+
+    def _GetPowermeterWatts_legacy(self):
         return CastToInt(self.GetRpcJson('/EM.GetStatus?id=0')['total_act_power'])
+
+    def _GetPowermeterWatts_new(self):
+        data = self.GetRpcJson('/Shelly.GetStatus')
+        if self.emeterindex != '':
+            key = 'em1:' + str(self.emeterindex)
+            return CastToInt(data[key]['act_power'])
+        em = data.get('em:0', data.get('em1:0'))
+        return CastToInt(
+            em.get('total_act_power',
+            em.get('act_power',
+            em.get('a_act_power', 0)
+          + em.get('b_act_power', 0)
+          + em.get('c_act_power', 0)))
+        )
 
 class ESPHome(Powermeter):
     def __init__(self, ip: str, port: str, domain: str, id: str):
