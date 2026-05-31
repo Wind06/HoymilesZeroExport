@@ -1,0 +1,65 @@
+#!/bin/sh
+
+# Script to read powermeter values from a DDSU666 Monophase
+# Needs "mbpoll" (command line utility to communicate with ModBus slave) to be installed, e.g. "apt install mbpoll"
+# Usage: GetPowerFromDDSU666 <Device_Number>
+
+# read registers 8196 via ModbusTCP
+# Optimized for variable weather conditions (sunny/cloudy intervals)
+
+DEVICE="/dev/ttyUSB0"
+ADDRESS="$1"
+OPENDTU_URL="http://xxx.xxx.xx.xx/api/livedata/status/inverters"
+PRODUCTION_THRESHOLD=1300   # more permissive
+
+get_total_production() {
+    PROD=$(curl -s --max-time 4 "$OPENDTU_URL" 2>/dev/null | \
+    grep -o '"Power":{"v":[0-9.]*' | grep -o '[0-9]*' | head -n 1)
+    echo "${PROD:-600}"
+}
+
+get_power() {
+    for i in 1 2 3; do
+        VE_SYSTEM=$(mbpoll -a "$ADDRESS" -b 9600 -P none -B -t 4:float -0 -r 8196 -c 1 -1 "$DEVICE" 2>&1 | grep "\[.*\]:")
+        if [ $? -eq 0 ]; then
+            RAW_VALUE=$(echo "$VE_SYSTEM" | awk -F':' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+            if echo "$RAW_VALUE" | grep -qE '^-?[0-9]+([.][0-9]+)?$'; then
+                echo "$RAW_VALUE"
+                return 0
+            fi
+        fi
+        sleep 0.4
+    done
+    echo "0"
+}
+
+RAW=$(get_power)
+AC_GRID=$(echo "$RAW * 1000" | bc)
+AC_GRID=$(printf "%.0f" "$AC_GRID")
+AC_GRID=$(( -1 * AC_GRID ))
+
+TOTAL_PROD=$(get_total_production)
+
+if [ -f "/tmp/last_grid.txt" ]; then
+    LAST=$(cat "/tmp/last_grid.txt")
+    DIFF=$(( AC_GRID - LAST ))
+    
+    if [ "$TOTAL_PROD" -lt "$PRODUCTION_THRESHOLD" ]; then
+        # Mode Nuageux / Basse production → très doux
+        if [ "$DIFF" -lt -140 ]; then
+            AC_GRID=$(( (AC_GRID + LAST*9) / 10 ))
+        fi
+        if [ "$AC_GRID" -lt -65 ]; then
+            AC_GRID=-65
+        fi
+    else
+        # Mode Normal (plein soleil)
+        if [ "$DIFF" -lt -200 ]; then
+            AC_GRID=$(( (AC_GRID + LAST*8) / 9 ))
+        elif [ "$DIFF" -lt -100 ]; then
+            AC_GRID=$(( (AC_GRID + LAST*2) / 3 ))
+        fi
+    fi
+fi
+
+echo "$AC_GRID" > "/tmp/last_grid.txt"
