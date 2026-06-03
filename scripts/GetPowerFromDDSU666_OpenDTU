@@ -2,22 +2,10 @@
 
 # GetPowerFromDDSU666.sh - Optimized version for cloudy / variable weather
 
-# === Configuration ===
-CONFIG_FILE="/home/admin/HoymilesZeroExportOpenDTU/HoymilesZeroExport/HoymilesZeroExport_Config_Override.ini"   # ← Change this if your path is different
-
-# Read OpenDTU IP address from config.ini
-OPENDTU_IP=$(grep -E '^OPENDTU_IP' "$CONFIG_FILE" | awk -F'=' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-
-if [ -z "$OPENDTU_IP" ]; then
-    echo "0"
-    exit 1
-fi
-
-OPENDTU_URL="http://${OPENDTU_IP}/api/livedata/status/inverters"
-PRODUCTION_THRESHOLD=1300   # Threshold to switch to soft mode (tolerant to variations)
-
 DEVICE="/dev/ttyUSB0"
 ADDRESS="$1"
+OPENDTU_URL="http://"OpenDTU_IP_Address"/api/livedata/status/inverters"
+PRODUCTION_THRESHOLD=1300   # Threshold to switch to soft mode during low production
 
 # Get total solar production from OpenDTU
 get_total_production() {
@@ -26,7 +14,7 @@ get_total_production() {
     echo "${PROD:-600}"
 }
 
-# Read power from DDSU666 with retry mechanism
+# Read power from DDSU666 with retry
 get_power() {
     for i in 1 2 3; do
         VE_SYSTEM=$(mbpoll -a "$ADDRESS" -b 9600 -P none -B -t 4:float -0 -r 8196 -c 1 -1 "$DEVICE" 2>&1 | grep "\[.*\]:")
@@ -56,7 +44,7 @@ if [ -f "/tmp/last_grid.txt" ]; then
     DIFF=$(( AC_GRID - LAST ))
     
     if [ "$TOTAL_PROD" -lt "$PRODUCTION_THRESHOLD" ]; then
-        # Low Production Mode (morning, evening, cloudy) - Very soft filtering
+        # Low Production Mode (morning, evening, cloudy) - Very soft
         if [ "$DIFF" -lt -140 ]; then
             AC_GRID=$(( (AC_GRID + LAST*9) / 10 ))
         fi
